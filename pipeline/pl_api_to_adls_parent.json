@@ -1,0 +1,425 @@
+{
+	"name": "pl_api_to_adls_parent",
+	"properties": {
+		"activities": [
+			{
+				"name": "web_act_limit",
+				"description": "to get limit value",
+				"type": "WebActivity",
+				"dependsOn": [],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"method": "GET",
+					"url": "http://ergast.com/api/f1/seasons.json"
+				}
+			},
+			{
+				"name": "set_var_limit_value",
+				"description": "this activity save limit value in variable",
+				"type": "SetVariable",
+				"dependsOn": [
+					{
+						"activity": "web_act_limit",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"variableName": "limit",
+					"value": {
+						"value": "@activity('web_act_limit').output.MRData.total",
+						"type": "Expression"
+					}
+				}
+			},
+			{
+				"name": "web_act_api_to_adls",
+				"description": "this will get data from api to adls.",
+				"type": "WebActivity",
+				"dependsOn": [
+					{
+						"activity": "set_var_limit_value",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"method": "GET",
+					"url": {
+						"value": "@concat('http://ergast.com/api/f1/seasons.json?limit=',variables('limit'))",
+						"type": "Expression"
+					}
+				}
+			},
+			{
+				"name": "for_each_to_iterate_season_value",
+				"description": "this will iterate season value..",
+				"type": "ForEach",
+				"dependsOn": [
+					{
+						"activity": "web_act_api_to_adls",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"userProperties": [],
+				"typeProperties": {
+					"items": {
+						"value": "@activity('web_act_api_to_adls').output.MRData.SeasonTable.Seasons",
+						"type": "Expression"
+					},
+					"isSequential": true,
+					"activities": [
+						{
+							"name": "web_act3_race_data",
+							"description": "This activity will get the data from API and store in ADLS Gen2 in JSON format",
+							"type": "WebActivity",
+							"dependsOn": [
+								{
+									"activity": "execute_child_pl",
+									"dependencyConditions": [
+										"Succeeded"
+									]
+								}
+							],
+							"policy": {
+								"timeout": "0.12:00:00",
+								"retry": 0,
+								"retryIntervalInSeconds": 30,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"method": "GET",
+								"url": {
+									"value": "@concat('http://ergast.com/api/f1/',item().season,'.json?limit=100')",
+									"type": "Expression"
+								}
+							}
+						},
+						{
+							"name": "set_var_race_data",
+							"description": "This activity will write races data into one string type variable.",
+							"type": "SetVariable",
+							"dependsOn": [
+								{
+									"activity": "web_act3_race_data",
+									"dependencyConditions": [
+										"Succeeded"
+									]
+								}
+							],
+							"policy": {
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"variableName": "races_data",
+								"value": {
+									"value": "@{activity('web_act3_race_data').output.MRData.RaceTable.Races}",
+									"type": "Expression"
+								}
+							}
+						},
+						{
+							"name": "copy_act_race_data",
+							"description": "this will copy data from set variable to\n adls > bronze > races.",
+							"type": "Copy",
+							"dependsOn": [
+								{
+									"activity": "set_var_race_data",
+									"dependencyConditions": [
+										"Succeeded"
+									]
+								}
+							],
+							"policy": {
+								"timeout": "0.12:00:00",
+								"retry": 0,
+								"retryIntervalInSeconds": 30,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"source": {
+									"type": "DelimitedTextSource",
+									"additionalColumns": [
+										{
+											"name": "mycolumn",
+											"value": {
+												"value": "@variables('races_data')",
+												"type": "Expression"
+											}
+										}
+									],
+									"storeSettings": {
+										"type": "AzureBlobFSReadSettings",
+										"recursive": true,
+										"enablePartitionDiscovery": false
+									},
+									"formatSettings": {
+										"type": "DelimitedTextReadSettings"
+									}
+								},
+								"sink": {
+									"type": "DelimitedTextSink",
+									"storeSettings": {
+										"type": "AzureBlobFSWriteSettings"
+									},
+									"formatSettings": {
+										"type": "DelimitedTextWriteSettings",
+										"quoteAllText": true,
+										"fileExtension": ".txt"
+									}
+								},
+								"enableStaging": false,
+								"translator": {
+									"type": "TabularTranslator",
+									"mappings": [
+										{
+											"source": {
+												"name": "mycolumn",
+												"type": "String"
+											},
+											"sink": {
+												"type": "String",
+												"physicalType": "String",
+												"ordinal": 1
+											}
+										}
+									],
+									"typeConversion": true,
+									"typeConversionSettings": {
+										"allowDataTruncation": true,
+										"treatBooleanAsNumber": false
+									}
+								}
+							},
+							"inputs": [
+								{
+									"referenceName": "ds_source_data",
+									"type": "DatasetReference"
+								}
+							],
+							"outputs": [
+								{
+									"referenceName": "DS_SINK_RACES_SEASON_WISE_DATA",
+									"type": "DatasetReference"
+								}
+							]
+						},
+						{
+							"name": "set_var_season_wise",
+							"description": "this activity will write season value in one variable.",
+							"type": "SetVariable",
+							"dependsOn": [],
+							"policy": {
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"variableName": "year_wise",
+								"value": {
+									"value": "@item().season",
+									"type": "Expression"
+								}
+							}
+						},
+						{
+							"name": "execute_child_pl",
+							"type": "ExecutePipeline",
+							"dependsOn": [
+								{
+									"activity": "set_var_season_wise",
+									"dependencyConditions": [
+										"Succeeded"
+									]
+								}
+							],
+							"policy": {
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"pipeline": {
+									"referenceName": "pl_race_result_round_wise_child",
+									"type": "PipelineReference"
+								},
+								"waitOnCompletion": true,
+								"parameters": {
+									"season_value_parameter": {
+										"value": "@variables('year_wise')",
+										"type": "Expression"
+									}
+								}
+							}
+						}
+					]
+				}
+			},
+			{
+				"name": "set_var_only_season_data",
+				"description": "this will write data from API to one string variable..",
+				"type": "SetVariable",
+				"dependsOn": [
+					{
+						"activity": "web_act_api_to_adls",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"variableName": "season_data_only",
+					"value": {
+						"value": "@{activity('web_act_api_to_adls').output.MRData.SeasonTable.Seasons}",
+						"type": "Expression"
+					}
+				}
+			},
+			{
+				"name": "copy_act",
+				"description": "This activity will write season data from set variable to adls in JSON format",
+				"type": "Copy",
+				"dependsOn": [
+					{
+						"activity": "set_var_only_season_data",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "DelimitedTextSource",
+						"additionalColumns": [
+							{
+								"name": "mycolumn",
+								"value": {
+									"value": "@variables('season_data_only')",
+									"type": "Expression"
+								}
+							}
+						],
+						"storeSettings": {
+							"type": "AzureBlobFSReadSettings",
+							"recursive": true,
+							"enablePartitionDiscovery": false
+						},
+						"formatSettings": {
+							"type": "DelimitedTextReadSettings"
+						}
+					},
+					"sink": {
+						"type": "DelimitedTextSink",
+						"storeSettings": {
+							"type": "AzureBlobFSWriteSettings"
+						},
+						"formatSettings": {
+							"type": "DelimitedTextWriteSettings",
+							"quoteAllText": true,
+							"fileExtension": ".txt"
+						}
+					},
+					"enableStaging": false,
+					"translator": {
+						"type": "TabularTranslator",
+						"mappings": [
+							{
+								"source": {
+									"name": "mycolumn",
+									"type": "String"
+								},
+								"sink": {
+									"type": "String",
+									"physicalType": "String",
+									"ordinal": 1
+								}
+							}
+						],
+						"typeConversion": true,
+						"typeConversionSettings": {
+							"allowDataTruncation": true,
+							"treatBooleanAsNumber": false
+						}
+					}
+				},
+				"inputs": [
+					{
+						"referenceName": "ds_source_data",
+						"type": "DatasetReference"
+					}
+				],
+				"outputs": [
+					{
+						"referenceName": "DS_SINK_SEASONS_DATA_ONLY",
+						"type": "DatasetReference"
+					}
+				]
+			}
+		],
+		"variables": {
+			"limit": {
+				"type": "String"
+			},
+			"races_data": {
+				"type": "String"
+			},
+			"year_wise": {
+				"type": "String"
+			},
+			"race_results": {
+				"type": "String"
+			},
+			"file_name_season": {
+				"type": "String"
+			},
+			"season_data_only": {
+				"type": "String"
+			}
+		},
+		"annotations": [],
+		"lastPublishTime": "2024-04-12T14:40:32Z"
+	},
+	"type": "Microsoft.DataFactory/factories/pipelines"
+}

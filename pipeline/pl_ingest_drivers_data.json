@@ -1,0 +1,200 @@
+{
+	"name": "pl_ingest_drivers_data",
+	"properties": {
+		"activities": [
+			{
+				"name": "web_act1_to_get_drivers",
+				"description": "this wil get us drivers details",
+				"type": "WebActivity",
+				"dependsOn": [],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"method": "GET",
+					"url": "https://ergast.com/api/f1/drivers.json"
+				}
+			},
+			{
+				"name": "set_var1_drivers",
+				"description": "This activity will set total page value into limit_var variable",
+				"type": "SetVariable",
+				"dependsOn": [
+					{
+						"activity": "web_act1_to_get_drivers",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"variableName": "limit_var",
+					"value": {
+						"value": "@activity('web_act1_to_get_drivers').output.MRData.total",
+						"type": "Expression"
+					}
+				}
+			},
+			{
+				"name": "web_act_to_get_drivers_data",
+				"type": "WebActivity",
+				"dependsOn": [
+					{
+						"activity": "set_var1_drivers",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"method": "GET",
+					"url": {
+						"value": "@concat('https://ergast.com/api/f1/drivers.json?limit=',variables('limit_var'))",
+						"type": "Expression"
+					}
+				}
+			},
+			{
+				"name": "act_Drivers_Data_Set_variable1",
+				"description": "This activity will set drivers data in variable.",
+				"type": "SetVariable",
+				"dependsOn": [
+					{
+						"activity": "web_act_to_get_drivers_data",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"variableName": "drivers",
+					"value": {
+						"value": "@{activity('web_act_to_get_drivers_data').output.MRData.DriverTable.Drivers}",
+						"type": "Expression"
+					}
+				}
+			},
+			{
+				"name": "act_Copy_data_from_API_to_ADLS_GEN_2",
+				"type": "Copy",
+				"dependsOn": [
+					{
+						"activity": "act_Drivers_Data_Set_variable1",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "DelimitedTextSource",
+						"additionalColumns": [
+							{
+								"name": "mycolumn",
+								"value": {
+									"value": "@variables('drivers')",
+									"type": "Expression"
+								}
+							}
+						],
+						"storeSettings": {
+							"type": "AzureBlobFSReadSettings",
+							"recursive": true,
+							"enablePartitionDiscovery": false
+						},
+						"formatSettings": {
+							"type": "DelimitedTextReadSettings"
+						}
+					},
+					"sink": {
+						"type": "DelimitedTextSink",
+						"storeSettings": {
+							"type": "AzureBlobFSWriteSettings"
+						},
+						"formatSettings": {
+							"type": "DelimitedTextWriteSettings",
+							"quoteAllText": true,
+							"fileExtension": ".txt"
+						}
+					},
+					"enableStaging": false,
+					"translator": {
+						"type": "TabularTranslator",
+						"mappings": [
+							{
+								"source": {
+									"name": "mycolumn",
+									"type": "String"
+								},
+								"sink": {
+									"type": "String",
+									"physicalType": "String",
+									"ordinal": 1
+								}
+							}
+						],
+						"typeConversion": true,
+						"typeConversionSettings": {
+							"allowDataTruncation": true,
+							"treatBooleanAsNumber": false
+						}
+					}
+				},
+				"inputs": [
+					{
+						"referenceName": "ds_source_data",
+						"type": "DatasetReference"
+					}
+				],
+				"outputs": [
+					{
+						"referenceName": "DS_SINK_DRIVERS_DATA",
+						"type": "DatasetReference"
+					}
+				]
+			}
+		],
+		"variables": {
+			"limit_var": {
+				"type": "String"
+			},
+			"drivers": {
+				"type": "String"
+			}
+		},
+		"annotations": [],
+		"lastPublishTime": "2024-04-11T15:23:32Z"
+	},
+	"type": "Microsoft.DataFactory/factories/pipelines"
+}
